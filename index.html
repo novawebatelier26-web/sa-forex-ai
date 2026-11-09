@@ -70,7 +70,7 @@ input{width:70px;padding:8px;border-radius:8px;border:1px solid var(--line);back
   <div class="row" style="align-items:center;margin-top:12px">
     <span class="k">Risk per trade (%)</span>
     <input id="risk" type="number" step="0.1" min="0.1" max="2" value="1">
-    <span class="note" style="flex:1">Max 2% allowed.</span>
+    <span class="note" style="flex:1">Max 2% allowed. One open trade per pair.</span>
   </div>
   <button class="act" id="open">Open demo trade</button>
 </div>
@@ -119,6 +119,7 @@ function units(sym,dist){var risk=Math.min(parseFloat(document.getElementById("r
   var riskZAR=S.balance*risk/100;var perUnitZAR=toZAR(sym,dist);return perUnitZAR>0?riskZAR/perUnitZAR:0;}
 function fmtR(x){return "R"+x.toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});}
 function fx(sym,x){return x===null?"–":x.toFixed(PAIRS[sym].d);}
+function hasOpen(sym){return S.open.some(function(t){return t.sym===sym;});}
 
 function advance(){for(var k in PAIRS){var s=S.series[k];s.push(nextPrice(k,s));if(s.length>300)s.shift();}
   var keep=[];S.open.forEach(function(t){var a=S.series[t.sym],p=a[a.length-1],exit=null;
@@ -156,7 +157,9 @@ function render(){
   document.getElementById("sl").textContent=fx(cur,an.sl);document.getElementById("tp").textContent=fx(cur,an.tp);
   var u=an.sig==="WAIT"?0:units(cur,an.dist);
   document.getElementById("lots").textContent=an.sig==="WAIT"?"–":(u/100000).toFixed(2);
-  document.getElementById("open").disabled=an.sig==="WAIT";
+  var btn=document.getElementById("open");
+  btn.disabled=an.sig==="WAIT"||hasOpen(cur);
+  btn.textContent=hasOpen(cur)?"Trade already open on this pair":"Open demo trade";
   draw(cur,an);
   document.getElementById("open-list").innerHTML=S.open.length?S.open.map(function(t){var a=S.series[t.sym],p=a[a.length-1],
     q=(p-t.entry)*t.units*(t.side==="BUY"?1:-1),z=toZAR(t.sym,q);
@@ -166,6 +169,7 @@ function render(){
 }
 
 document.getElementById("open").onclick=function(){var an=analyse(cur);if(an.sig==="WAIT")return;
+  if(hasOpen(cur)){alert("You already have an open trade on this pair.");return;}
   var u=units(cur,an.dist);if(u<=0)return;
   S.open.push({id:S.id++,sym:cur,side:an.sig,entry:an.p,sl:an.sl,tp:an.tp,units:u});save();render();};
 document.getElementById("n1").onclick=function(){advance();render();};

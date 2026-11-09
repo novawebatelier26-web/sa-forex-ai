@@ -30,13 +30,13 @@ th:first-child,td:first-child{text-align:left}
 </style>
 </head>
 <body>
-<h1>SA Forex AI - Strategy Lab 🇿🇦</h1>
+<h1>SA Forex AI - Strategy Lab v2 🇿🇦</h1>
 <div class="sub">Real daily prices. Each idea is tested on early years, then on later years it has never seen.</div>
 
 <div class="card">
   <div class="row"><span class="k">Start year</span><input id="start" type="number" min="2001" max="2026" value="2015"></div>
   <div class="row"><span class="k">Early period ends in year</span><input id="split" type="number" min="2002" max="2026" value="2020"></div>
-  <div class="row"><span class="k">Risk per trade is 1% (results shown in R)</span></div>
+  <div class="row"><span class="k">Results shown in R (amount risked per trade)</span></div>
   <button class="act" id="go">Run all strategies</button>
   <div id="status"></div>
 </div>
@@ -47,8 +47,10 @@ th:first-child,td:first-child{text-align:left}
 <div class="card note">
 <b>How to read this</b><br>
 R = the amount risked on one trade. Avg R above 0 means the idea made money on average. Profit factor (PF) above 1 means total wins were bigger than total losses. An idea only passes if both periods show Avg R above 0.05 and PF above 1.1 with at least 40 trades each.<br><br>
+<b>Sanity check</b><br>
+The "Random entries" card should come out slightly negative, close to zero (that is just trading costs). If it is far below zero, the test is biased and the other results can't be trusted. Any real idea must beat the random card by a clear margin.<br><br>
 <b>Limits of this test</b><br>
-Daily reference rates have one price per day, so stops and targets are only checked at each day's close. Spreads are assumed (EUR/USD 1.2 pips, GBP/USD 1.5, USD/ZAR 50) and overnight swap costs are not included. Entries happen at the day's closing price. With five ideas tested, one can pass by luck, so a pass is a reason to test further, never a promise. The "Random entries" row is a sanity check: it shows what luck plus costs produces.
+Daily reference rates have one price per day, so stops and targets are only checked at each day's close. When the close passes a stop or target, the trade is assumed to fill at that exact level. Real markets can gap past a stop, so real losses can be a little worse. Spreads are assumed (EUR/USD 1.2 pips, GBP/USD 1.5, USD/ZAR 50) and overnight swap costs are not included. With five ideas tested, one can pass by luck, so a pass is a reason to test further, never a promise.
 </div>
 
 <script>
@@ -107,7 +109,7 @@ var STRATS=[
     return d.c[i]>hi?1:(d.c[i]<lo?-1:0);}},
  {id:"rsi",name:"4. RSI reversal",desc:"Buy when RSI climbs back above 30, sell when it drops back below 70. Stop 2 ATR, target 2 ATR.",sl:2,tp:2,hold:15,
   sig:function(d,i){if(d.rs[i-1]<30&&d.rs[i]>=30)return 1;if(d.rs[i-1]>70&&d.rs[i]<=70)return -1;return 0;}},
- {id:"rand",name:"5. Random entries (sanity check)",desc:"Enters at random with the same stop and target as idea 1. Shows what luck plus trading costs gives.",sl:1.5,tp:3,hold:20,
+ {id:"rand",name:"5. Random entries (sanity check)",desc:"Enters at random with the same stop and target as idea 1. Should come out slightly negative, close to zero.",sl:1.5,tp:3,hold:20,
   sig:function(d,i){var r=pseudo(i,d.seed);return r<0.04?1:(r<0.08?-1:0);}}
 ];
 
@@ -116,8 +118,9 @@ function simulate(p,dates,d,S,fromDate){
   for(i=210;i<c.length;i++){
     if(open){
       var t=open,exit=null,price=c[i];
-      if(t.side===1){if(price<=t.sl)exit=price;else if(price>=t.tp)exit=t.tp;}
-      else{if(price>=t.sl)exit=price;else if(price<=t.tp)exit=t.tp;}
+      /* stops and targets both fill at their exact level (fair to wins and losses) */
+      if(t.side===1){if(price<=t.sl)exit=t.sl;else if(price>=t.tp)exit=t.tp;}
+      else{if(price>=t.sl)exit=t.sl;else if(price<=t.tp)exit=t.tp;}
       if(exit===null&&i-t.i>=S.hold)exit=price;
       if(exit!==null){
         var R=(exit-t.entry)*t.side/t.dist-p.spread/t.dist;
@@ -164,12 +167,13 @@ $("go").onclick=async function(){
       var d=indicators(s.close,k+1);
       STRATS.forEach(function(S){results[S.id]=results[S.id].concat(simulate(PAIRS[k],s.dates,d,S,fromDate));});
     }
-    var html="",passes=0;
+    var html="",passes=0,randAvg=0;
     STRATS.forEach(function(S){
       var all=results[S.id];
       var early=all.filter(function(t){return t.date<splitDate;}),late=all.filter(function(t){return t.date>=splitDate;});
       var e=stats(early),l=stats(late),a=stats(all),v=verdict(e,l);
-      if(v[0]==="pass")passes++;
+      if(S.id==="rand")randAvg=a.avg;
+      if(v[0]==="pass"&&S.id!=="rand")passes++;
       html+="<div class='card'><div class='row'><b>"+S.name+"</b><span class='badge b-"+v[0]+"'>"+v[1]+"</span></div>"+
         "<div class='note'>"+S.desc+"</div>"+
         "<table><tr><th>Period</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>PF</th></tr>"+
@@ -177,9 +181,10 @@ $("go").onclick=async function(){
     });
     $("out").innerHTML=html;
     $("summary").style.display="block";
-    $("summary").innerHTML=passes===0?
-      "<b>Result:</b> no idea passed both periods. That is a normal, useful result: it means none of these simple rules has a reliable edge on daily prices, and we found out without risking money.":
-      "<b>Result:</b> "+passes+" idea(s) passed both periods. This is a reason to test further (more pairs, stricter costs, different years), not proof that it will make money.";
+    var calib=randAvg<-0.15?"<b>Warning:</b> the random-entries check is far below zero ("+randAvg.toFixed(2)+"R), so this test is still biased. Do not trust these results.<br><br>":"<b>Sanity check OK:</b> random entries came out at "+randAvg.toFixed(2)+"R, close to zero as expected.<br><br>";
+    $("summary").innerHTML=calib+(passes===0?
+      "<b>Result:</b> no idea passed both periods.":
+      "<b>Result:</b> "+passes+" idea(s) passed both periods. This is a reason to test further, not proof that it will make money.");
     status("");
   }catch(e){status("Problem: "+(e&&e.message?e.message:e));}
   btn.disabled=false;

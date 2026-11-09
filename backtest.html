@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>SA Forex AI - Backtest</title>
+<title>SA Forex AI - Strategy Lab</title>
 <style>
 :root{--bg:#0b0f17;--card:#141b29;--text:#e8edf5;--mute:#8a96a8;--buy:#22c55e;--sell:#ef4444;--acc:#38bdf8;--line:#243047}
 *{box-sizing:border-box}
@@ -11,59 +11,44 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,S
 h1{font-size:20px;margin:6px 0 2px}
 .sub{color:var(--mute);font-size:12px;margin-bottom:12px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
-.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
-.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;justify-content:space-between}
 .k{color:var(--mute);font-size:11px}
-.v{font-size:17px;font-weight:700}
 input{width:80px;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0b0f17;color:var(--text);font-size:16px}
 button.act{width:100%;padding:13px;border-radius:12px;border:0;background:var(--acc);color:#06222f;font-size:15px;font-weight:700}
 button.act:disabled{opacity:.4}
 .win{color:var(--buy)}.loss{color:var(--sell)}
 .note{color:var(--mute);font-size:11px;line-height:1.5}
-table{width:100%;border-collapse:collapse;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
 th{color:var(--mute);font-weight:500;font-size:11px;text-align:right;padding:4px 2px}
 td{text-align:right;padding:6px 2px;border-top:1px solid var(--line)}
 th:first-child,td:first-child{text-align:left}
-canvas{width:100%;height:170px;display:block}
+.badge{font-size:11px;font-weight:700;border-radius:6px;padding:3px 8px}
+.b-pass{background:#0f3a22;color:#22c55e}
+.b-fail{background:#3b1414;color:#ef4444}
+.b-few{background:#3b2f0b;color:#facc15}
 #status{margin-top:8px;color:#facc15;font-size:12px}
 </style>
 </head>
 <body>
-<h1>SA Forex AI - Backtest 🇿🇦</h1>
-<div class="sub">Real daily prices (European Central Bank reference rates via Frankfurter). Same rules as the dashboard.</div>
+<h1>SA Forex AI - Strategy Lab 🇿🇦</h1>
+<div class="sub">Real daily prices. Each idea is tested on early years, then on later years it has never seen.</div>
 
 <div class="card">
-  <div class="row"><span class="k" style="width:140px">Risk per trade (%)</span><input id="risk" type="number" step="0.1" min="0.1" max="2" value="1"></div>
-  <div class="row"><span class="k" style="width:140px">Start year</span><input id="start" type="number" min="2000" max="2026" value="2015"></div>
-  <button class="act" id="go">Run backtest</button>
+  <div class="row"><span class="k">Start year</span><input id="start" type="number" min="2001" max="2026" value="2015"></div>
+  <div class="row"><span class="k">Early period ends in year</span><input id="split" type="number" min="2002" max="2026" value="2020"></div>
+  <div class="row"><span class="k">Risk per trade is 1% (results shown in R)</span></div>
+  <button class="act" id="go">Run all strategies</button>
   <div id="status"></div>
 </div>
 
-<div id="out" style="display:none">
-  <div class="card">
-    <div class="k" id="period"></div>
-    <div class="grid" style="margin-top:8px">
-      <div><div class="k">Trades</div><div class="v" id="n"></div></div>
-      <div><div class="k">Win rate</div><div class="v" id="wr"></div></div>
-      <div><div class="k">Avg result (R)</div><div class="v" id="avg"></div></div>
-      <div><div class="k">Total return</div><div class="v" id="ret"></div></div>
-      <div><div class="k">Worst drop</div><div class="v" id="dd"></div></div>
-      <div><div class="k">Profit factor</div><div class="v" id="pf"></div></div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="k">Account growth (starting at 1.00)</div>
-    <canvas id="eq" width="600" height="340"></canvas>
-  </div>
-  <div class="card"><div class="k" style="margin-bottom:6px">By pair</div><table id="tp"></table></div>
-  <div class="card"><div class="k" style="margin-bottom:6px">By year</div><table id="ty"></table></div>
-</div>
+<div id="summary" class="card note" style="display:none"></div>
+<div id="out"></div>
 
 <div class="card note">
 <b>How to read this</b><br>
-R = the amount risked on one trade. A loss is about -1R, a win is +2R (take-profit is twice the stop-loss). With 2:1 reward-to-risk you only need about 33% wins to break even, so the win rate alone does not decide whether a strategy is good. Average R and the worst drop matter more.<br><br>
+R = the amount risked on one trade. Avg R above 0 means the idea made money on average. Profit factor (PF) above 1 means total wins were bigger than total losses. An idea only passes if both periods show Avg R above 0.05 and PF above 1.1 with at least 40 trades each.<br><br>
 <b>Limits of this test</b><br>
-Daily reference rates give one price per day, with no highs or lows, so stop-loss and take-profit are only checked at each day's closing price. Spreads are assumed (EUR/USD 1.2 pips, GBP/USD 1.5 pips, USD/ZAR 50 pips) and overnight swap costs are not included. Trades open for at most 20 days. The rules were not tuned to this data. Past results do not predict the future, and a 70% win rate is a target, not a promise.
+Daily reference rates have one price per day, so stops and targets are only checked at each day's close. Spreads are assumed (EUR/USD 1.2 pips, GBP/USD 1.5, USD/ZAR 50) and overnight swap costs are not included. Entries happen at the day's closing price. With five ideas tested, one can pass by luck, so a pass is a reason to test further, never a promise. The "Random entries" row is a sanity check: it shows what luck plus costs produces.
 </div>
 
 <script>
@@ -72,13 +57,12 @@ var PAIRS=[
  {id:"GBPUSD",base:"GBP",quote:"USD",spread:0.00015},
  {id:"USDZAR",base:"USD",quote:"ZAR",spread:0.005}
 ];
-var MAXHOLD=20;
 function $(id){return document.getElementById(id);}
 function status(t){$("status").textContent=t||"";}
 
-async function getSeries(p,startYear){
+async function getSeries(p,fromYear){
   var thisYear=new Date().getUTCFullYear(),dates=[],close=[];
-  for(var y=startYear;y<=thisYear;y++){
+  for(var y=fromYear;y<=thisYear;y++){
     var range=(y===thisYear)?(y+"-01-01.."):(y+"-01-01.."+y+"-12-31");
     status("Downloading "+p.id+" "+y+"...");
     var res=await fetch("https://api.frankfurter.dev/v1/"+range+"?base="+p.base+"&symbols="+p.quote);
@@ -91,7 +75,7 @@ async function getSeries(p,startYear){
 
 function emaArr(a,n){var k=2/(n+1),o=[a[0]];for(var i=1;i<a.length;i++)o.push(a[i]*k+o[i-1]*(1-k));return o;}
 function rsiArr(a,n){
-  var r=[],i;for(i=0;i<a.length;i++)r.push(null);
+  var r=[],i;for(i=0;i<a.length;i++)r.push(50);
   if(a.length<=n)return r;
   var g=0,l=0;
   for(i=1;i<=n;i++){var d=a[i]-a[i-1];if(d>=0)g+=d;else l-=d;}
@@ -100,88 +84,103 @@ function rsiArr(a,n){
   return r;
 }
 function atrAt(a,i,n){var s=0;for(var k=i-n+1;k<=i;k++)s+=Math.abs(a[k]-a[k-1]);return s/n;}
+function pseudo(i,seed){var x=Math.sin(i*12.9898+seed*78.233)*43758.5453;return x-Math.floor(x);}
 
-function simulate(p,dates,c){
-  var e9=emaArr(c,9),e21=emaArr(c,21),e12=emaArr(c,12),e26=emaArr(c,26),ml=[],i;
+function indicators(c,seed){
+  var e12=emaArr(c,12),e26=emaArr(c,26),ml=[],i;
   for(i=0;i<c.length;i++)ml.push(e12[i]-e26[i]);
-  var sg=emaArr(ml,9),rs=rsiArr(c,14),trades=[],open=null;
-  for(i=60;i<c.length;i++){
+  var sg=emaArr(ml,9),h=[];
+  for(i=0;i<c.length;i++)h.push(ml[i]-sg[i]);
+  return {c:c,e9:emaArr(c,9),e21:emaArr(c,21),e20:emaArr(c,20),e50:emaArr(c,50),e200:emaArr(c,200),h:h,rs:rsiArr(c,14),seed:seed};
+}
+
+var STRATS=[
+ {id:"cur",name:"1. Current rules",desc:"EMA 9/21 + MACD + RSI vote (what the dashboard uses). Stop 1.5 ATR, target 3 ATR.",sl:1.5,tp:3,hold:20,
+  sig:function(d,i){var s=(d.e9[i]>d.e21[i]?1:-1)+(d.h[i]>0?1:-1)+(d.rs[i]<30?1:(d.rs[i]>70?-1:0));return s>=2?1:(s<=-2?-1:0);}},
+ {id:"trend",name:"2. Trend following",desc:"Buy when EMA 20 crosses above EMA 50 while price is above EMA 200 (sell is the mirror). Stop 2 ATR, target 6 ATR.",sl:2,tp:6,hold:60,
+  sig:function(d,i){
+    if(d.e20[i-1]<=d.e50[i-1]&&d.e20[i]>d.e50[i]&&d.c[i]>d.e200[i])return 1;
+    if(d.e20[i-1]>=d.e50[i-1]&&d.e20[i]<d.e50[i]&&d.c[i]<d.e200[i])return -1;
+    return 0;}},
+ {id:"break",name:"3. 20-day breakout",desc:"Buy when the close beats the highest close of the last 20 days (sell on the lowest). Stop 2 ATR, target 4 ATR.",sl:2,tp:4,hold:40,
+  sig:function(d,i){var hi=-Infinity,lo=Infinity;for(var k=i-20;k<i;k++){if(d.c[k]>hi)hi=d.c[k];if(d.c[k]<lo)lo=d.c[k];}
+    return d.c[i]>hi?1:(d.c[i]<lo?-1:0);}},
+ {id:"rsi",name:"4. RSI reversal",desc:"Buy when RSI climbs back above 30, sell when it drops back below 70. Stop 2 ATR, target 2 ATR.",sl:2,tp:2,hold:15,
+  sig:function(d,i){if(d.rs[i-1]<30&&d.rs[i]>=30)return 1;if(d.rs[i-1]>70&&d.rs[i]<=70)return -1;return 0;}},
+ {id:"rand",name:"5. Random entries (sanity check)",desc:"Enters at random with the same stop and target as idea 1. Shows what luck plus trading costs gives.",sl:1.5,tp:3,hold:20,
+  sig:function(d,i){var r=pseudo(i,d.seed);return r<0.04?1:(r<0.08?-1:0);}}
+];
+
+function simulate(p,dates,d,S,fromDate){
+  var c=d.c,trades=[],open=null,i;
+  for(i=210;i<c.length;i++){
     if(open){
       var t=open,exit=null,price=c[i];
       if(t.side===1){if(price<=t.sl)exit=price;else if(price>=t.tp)exit=t.tp;}
       else{if(price>=t.sl)exit=price;else if(price<=t.tp)exit=t.tp;}
-      if(exit===null&&i-t.i>=MAXHOLD)exit=price;
+      if(exit===null&&i-t.i>=S.hold)exit=price;
       if(exit!==null){
         var R=(exit-t.entry)*t.side/t.dist-p.spread/t.dist;
-        trades.push({pair:p.id,date:dates[i],R:R});open=null;
+        if(t.date>=fromDate)trades.push({date:t.date,R:R});
+        open=null;
       }
       continue;
     }
-    var hist=ml[i]-sg[i];
-    var score=(e9[i]>e21[i]?1:-1)+(hist>0?1:-1)+(rs[i]<30?1:(rs[i]>70?-1:0));
-    if(score>=2||score<=-2){
-      var side=score>0?1:-1,dist=atrAt(c,i,14)*1.5;
-      if(dist>0)open={side:side,entry:c[i],dist:dist,sl:c[i]-side*dist,tp:c[i]+side*dist*2,i:i};
+    var side=S.sig(d,i);
+    if(side!==0){
+      var dist=atrAt(c,i,14)*S.sl;
+      if(dist>0)open={side:side,entry:c[i],dist:dist,sl:c[i]-side*dist,tp:c[i]+side*dist*(S.tp/S.sl),i:i,date:dates[i]};
     }
   }
   return trades;
 }
 
-function pct(x){return (x*100).toFixed(1)+"%";}
-function cls(x){return x>=0?"win":"loss";}
-
-function stats(list,riskPct){
-  var n=list.length,w=0,sum=0,gw=0,gl=0,eq=1,peak=1,dd=0,curve=[1];
-  list.forEach(function(t){
-    if(t.R>0){w++;gw+=t.R;}else gl+=-t.R;
-    sum+=t.R;eq*=Math.max(0,1+riskPct/100*t.R);
-    if(eq>peak)peak=eq;var d=(peak-eq)/peak;if(d>dd)dd=d;curve.push(eq);
-  });
-  return {n:n,wr:n?w/n:0,avg:n?sum/n:0,ret:eq-1,dd:dd,pf:gl>0?gw/gl:(gw>0?99:0),curve:curve};
+function stats(list){
+  var n=list.length,w=0,sum=0,gw=0,gl=0;
+  list.forEach(function(t){if(t.R>0){w++;gw+=t.R;}else gl+=-t.R;sum+=t.R;});
+  return {n:n,wr:n?w/n:0,avg:n?sum/n:0,pf:gl>0?gw/gl:(gw>0?99:0)};
 }
-
-function drawCurve(curve){
-  var c=$("eq"),x=c.getContext("2d"),W=c.width,H=c.height;
-  x.clearRect(0,0,W,H);
-  var mn=Math.min.apply(null,curve.concat([1])),mx=Math.max.apply(null,curve.concat([1])),pad=(mx-mn)*0.1||0.01;mn-=pad;mx+=pad;
-  function Y(v){return H-(v-mn)/(mx-mn)*H;}
-  x.beginPath();x.strokeStyle="#243047";x.setLineDash([6,6]);x.moveTo(0,Y(1));x.lineTo(W,Y(1));x.stroke();x.setLineDash([]);
-  x.beginPath();x.strokeStyle=curve[curve.length-1]>=1?"#22c55e":"#ef4444";x.lineWidth=2.5;
-  curve.forEach(function(v,i){var px=i/(curve.length-1||1)*W;i?x.lineTo(px,Y(v)):x.moveTo(px,Y(v));});x.stroke();
+function verdict(e,l){
+  if(e.n<40||l.n<40)return ["few","TOO FEW TRADES"];
+  if(e.avg>0.05&&e.pf>1.1&&l.avg>0.05&&l.pf>1.1)return ["pass","PASSED BOTH PERIODS"];
+  return ["fail","FAILED"];
+}
+function cls(x){return x>0?"win":"loss";}
+function rowHtml(label,s){
+  return "<tr><td>"+label+"</td><td>"+s.n+"</td><td>"+(s.wr*100).toFixed(1)+"%</td><td class='"+cls(s.avg)+"'>"+s.avg.toFixed(2)+"</td><td class='"+(s.pf>1?"win":"loss")+"'>"+s.pf.toFixed(2)+"</td></tr>";
 }
 
 $("go").onclick=async function(){
-  var btn=$("go");btn.disabled=true;$("out").style.display="none";
+  var btn=$("go");btn.disabled=true;$("out").innerHTML="";$("summary").style.display="none";
   try{
-    var riskPct=Math.min(Math.max(parseFloat($("risk").value)||1,0.1),2);
-    var startYear=Math.min(Math.max(parseInt($("start").value)||2015,2000),new Date().getUTCFullYear());
-    var all=[],first=null,last=null;
+    var thisYear=new Date().getUTCFullYear();
+    var startYear=Math.min(Math.max(parseInt($("start").value)||2015,2001),thisYear);
+    var split=Math.min(Math.max(parseInt($("split").value)||2020,startYear),thisYear-1);
+    var fromDate=startYear+"-01-01",splitDate=(split+1)+"-01-01";
+    var results={};STRATS.forEach(function(S){results[S.id]=[];});
     for(var k=0;k<PAIRS.length;k++){
-      var s=await getSeries(PAIRS[k],startYear);
-      if(!first||s.dates[0]<first)first=s.dates[0];
-      if(!last||s.dates[s.dates.length-1]>last)last=s.dates[s.dates.length-1];
-      all=all.concat(simulate(PAIRS[k],s.dates,s.close));
+      var s=await getSeries(PAIRS[k],startYear-1);
+      status("Testing "+PAIRS[k].id+"...");
+      var d=indicators(s.close,k+1);
+      STRATS.forEach(function(S){results[S.id]=results[S.id].concat(simulate(PAIRS[k],s.dates,d,S,fromDate));});
     }
-    all.sort(function(a,b){return a.date<b.date?-1:(a.date>b.date?1:0);});
-    var st=stats(all,riskPct);
-    $("period").textContent="Data from "+first+" to "+last+" • risk "+riskPct+"% per trade • all three pairs combined";
-    $("n").textContent=st.n;
-    $("wr").textContent=pct(st.wr);
-    $("avg").textContent=st.avg.toFixed(2)+"R";$("avg").className="v "+cls(st.avg);
-    $("ret").textContent=pct(st.ret);$("ret").className="v "+cls(st.ret);
-    $("dd").textContent="-"+pct(st.dd);$("dd").className="v loss";
-    $("pf").textContent=st.pf.toFixed(2);$("pf").className="v "+(st.pf>=1?"win":"loss");
-    drawCurve(st.curve);
-    var th="<tr><th>Pair</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>Return</th></tr>";
-    $("tp").innerHTML=th+PAIRS.map(function(p){
-      var l=all.filter(function(t){return t.pair===p.id;}),q=stats(l,riskPct);
-      return "<tr><td>"+p.id.slice(0,3)+"/"+p.id.slice(3)+"</td><td>"+q.n+"</td><td>"+pct(q.wr)+"</td><td class='"+cls(q.avg)+"'>"+q.avg.toFixed(2)+"</td><td class='"+cls(q.ret)+"'>"+pct(q.ret)+"</td></tr>";
-    }).join("");
-    var years={};all.forEach(function(t){var y=t.date.slice(0,4);(years[y]=years[y]||[]).push(t);});
-    $("ty").innerHTML="<tr><th>Year</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>Return</th></tr>"+
-      Object.keys(years).sort().map(function(y){var q=stats(years[y],riskPct);
-        return "<tr><td>"+y+"</td><td>"+q.n+"</td><td>"+pct(q.wr)+"</td><td class='"+cls(q.avg)+"'>"+q.avg.toFixed(2)+"</td><td class='"+cls(q.ret)+"'>"+pct(q.ret)+"</td></tr>";}).join("");
-    $("out").style.display="block";status("");
+    var html="",passes=0;
+    STRATS.forEach(function(S){
+      var all=results[S.id];
+      var early=all.filter(function(t){return t.date<splitDate;}),late=all.filter(function(t){return t.date>=splitDate;});
+      var e=stats(early),l=stats(late),a=stats(all),v=verdict(e,l);
+      if(v[0]==="pass")passes++;
+      html+="<div class='card'><div class='row'><b>"+S.name+"</b><span class='badge b-"+v[0]+"'>"+v[1]+"</span></div>"+
+        "<div class='note'>"+S.desc+"</div>"+
+        "<table><tr><th>Period</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>PF</th></tr>"+
+        rowHtml("Early "+startYear+"-"+split,e)+rowHtml("Later "+(split+1)+"+",l)+rowHtml("All",a)+"</table></div>";
+    });
+    $("out").innerHTML=html;
+    $("summary").style.display="block";
+    $("summary").innerHTML=passes===0?
+      "<b>Result:</b> no idea passed both periods. That is a normal, useful result: it means none of these simple rules has a reliable edge on daily prices, and we found out without risking money.":
+      "<b>Result:</b> "+passes+" idea(s) passed both periods. This is a reason to test further (more pairs, stricter costs, different years), not proof that it will make money.";
+    status("");
   }catch(e){status("Problem: "+(e&&e.message?e.message:e));}
   btn.disabled=false;
 };

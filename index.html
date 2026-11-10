@@ -9,8 +9,10 @@
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:max(12px,env(safe-area-inset-top)) 14px max(20px,env(safe-area-inset-bottom));max-width:640px;margin:0 auto}
 h1{font-size:20px;margin:6px 0 2px}
-.sub{color:var(--mute);font-size:12px;margin-bottom:12px}
-.badge{display:inline-block;background:#3b2f0b;color:#facc15;border-radius:6px;padding:2px 8px;font-size:11px;margin-left:6px}
+.sub{color:var(--mute);font-size:12px;margin-bottom:10px}
+.badge{display:inline-block;background:#0f3a22;color:#22c55e;border-radius:6px;padding:2px 8px;font-size:11px;margin-left:6px}
+.warn{background:#3b2f0b;color:#facc15;border-radius:12px;padding:10px 12px;font-size:12px;line-height:1.5;margin-bottom:12px}
+.warn a{color:#facc15;font-weight:700}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
 .row{display:flex;gap:8px;flex-wrap:wrap}
 .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
@@ -35,8 +37,9 @@ input.full{width:100%;margin-bottom:8px}
 </style>
 </head>
 <body>
-<h1>SA Forex AI 🇿🇦 <span class="badge">DEMO • SIMULATED DATA</span></h1>
-<div class="sub">Paper trading only. No real money. Prices are randomly generated for testing.</div>
+<h1>SA Forex AI 🇿🇦 <span class="badge">DEMO • REAL DAILY PRICES</span></h1>
+<div class="sub">Practice account only. No real money.</div>
+<div class="warn"><b>Practice only.</b> Our tests on 2003 to 2026 data found that these signals are no better than random entries. Do not use them for real money. <a href="backtest.html">See the Strategy Lab</a></div>
 <div id="msg"></div>
 
 <div id="login" class="card" style="display:none">
@@ -66,11 +69,11 @@ input.full{width:100%;margin-bottom:8px}
 
 <div class="card">
   <div class="row" style="justify-content:space-between;align-items:center">
-    <div><div class="k" id="pairname"></div><div class="v" id="price"></div></div>
+    <div><div class="k" id="pairname"></div><div class="v" id="price"></div><div class="k" id="asof"></div></div>
     <div class="sig" id="sig">WAIT</div>
   </div>
   <canvas id="chart" width="600" height="360"></canvas>
-  <div class="note">Blue = price • Yellow = EMA 9 • Purple = EMA 21 • Green/Red lines = take-profit/stop-loss</div>
+  <div class="note">Blue = daily price • Yellow = EMA 9 • Purple = EMA 21 • Green/Red lines = take-profit/stop-loss</div>
 </div>
 
 <div class="card">
@@ -90,11 +93,11 @@ input.full{width:100%;margin-bottom:8px}
     <span class="note" style="flex:1">Max 2% allowed. One open trade per pair.</span>
   </div>
   <button class="act" id="open">Open demo trade</button>
+  <div class="note" style="margin-top:8px">Trades use the latest daily reference rate and are charged HFM's spread (EUR/USD 1.8 pips, GBP/USD 1.9, USD/ZAR 79). Stops and targets are checked against each new daily close.</div>
 </div>
 
 <div class="row" style="margin-bottom:12px">
-  <button class="sec" id="n1">Next candle</button>
-  <button class="sec" id="n10">+10 candles</button>
+  <button class="sec" id="refresh">Refresh prices</button>
   <button class="sec" id="reset">Reset demo</button>
 </div>
 
@@ -102,31 +105,50 @@ input.full{width:100%;margin-bottom:8px}
 <div class="card"><div class="k">Recent closed trades</div><div id="hist"></div></div>
 </div>
 
-<div class="note">Learning project. Simulated results say nothing about real trading performance. A 70% win rate is a target to test, not a promise. Real-money trading stays switched off.</div>
+<div class="note">Prices are European Central Bank daily reference rates (one per business day, via Frankfurter). They are not live broker quotes. Learning project: demo results say nothing about real trading performance. A 70% win rate is a target to test, not a promise. Real-money trading stays switched off.</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"></script>
 <script>
 var SB_URL="https://vjjqpokcstsftpzaneqz.supabase.co";
 var SB_KEY="sb_publishable_5W4JsCrrDe-aQummnJgbyA_L_D-RY5P";
-var PAIRS={EURUSD:{p:1.085,v:0.0007,d:5,q:"USD"},GBPUSD:{p:1.27,v:0.0009,d:5,q:"USD"},USDZAR:{p:18.1,v:0.035,d:4,q:"ZAR"}};
-var SKEY="saforexai_series_v2",MAXRISK=2;
-var cur="EURUSD",sb=null,uid=null,busy=false;
+var PAIRS={
+ EURUSD:{base:"EUR",quote:"USD",d:5,q:"USD",spread:0.00018},
+ GBPUSD:{base:"GBP",quote:"USD",d:5,q:"USD",spread:0.00019},
+ USDZAR:{base:"USD",quote:"ZAR",d:4,q:"ZAR",spread:0.0079}
+};
+var MAXRISK=2,MAXHOLD=20;
+var cur="EURUSD",sb=null,uid=null,busy=false,ready=false;
 var S={balance:100000,open:[],closed:[],series:{}};
 
 function $(id){return document.getElementById(id);}
 function msg(t){$("msg").textContent=t||"";}
-function rnd(){var u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
-function nextPrice(sym,s){var n=s.length,last=s[n-1],prev=n>1?last-s[n-2]:0;return last+prev*0.15+rnd()*PAIRS[sym].v;}
-function freshSeries(){var o={};for(var k in PAIRS){var s=[PAIRS[k].p];for(var i=0;i<200;i++)s.push(nextPrice(k,s));o[k]=s;}return o;}
-function loadSeries(){try{var t=localStorage.getItem(SKEY);if(t){S.series=JSON.parse(t);return;}}catch(e){}S.series=freshSeries();saveSeries();}
-function saveSeries(){try{localStorage.setItem(SKEY,JSON.stringify(S.series));}catch(e){}}
 
+/* ---------- real daily prices ---------- */
+async function getSeries(sym){
+  var p=PAIRS[sym],thisYear=new Date().getUTCFullYear(),dates=[],close=[];
+  for(var y=thisYear-1;y<=thisYear;y++){
+    var range=(y===thisYear)?(y+"-01-01.."):(y+"-01-01.."+y+"-12-31");
+    var res=await fetch("https://api.frankfurter.dev/v1/"+range+"?base="+p.base+"&symbols="+p.quote);
+    if(!res.ok){if(y===thisYear&&dates.length)continue;throw new Error("Price download failed ("+res.status+")");}
+    var j=await res.json(),keys=Object.keys(j.rates||{}).sort();
+    keys.forEach(function(d){var v=j.rates[d][p.quote];if(v){dates.push(d);close.push(v);}});
+  }
+  if(close.length<60)throw new Error("Not enough price history for "+sym);
+  return {dates:dates,close:close};
+}
+async function loadPrices(){
+  msg("Loading real prices...");
+  for(var k in PAIRS){S.series[k]=await getSeries(k);}
+  msg("");
+}
+
+/* ---------- indicators ---------- */
 function ema(a,n){var k=2/(n+1),o=[a[0]];for(var i=1;i<a.length;i++)o.push(a[i]*k+o[i-1]*(1-k));return o;}
 function rsi(a,n){var g=0,l=0,i;for(i=1;i<=n;i++){var d=a[i]-a[i-1];if(d>=0)g+=d;else l-=d;}g/=n;l/=n;
   for(i=n+1;i<a.length;i++){var d2=a[i]-a[i-1];g=(g*(n-1)+(d2>0?d2:0))/n;l=(l*(n-1)+(d2<0?-d2:0))/n;}
   return l===0?100:100-100/(1+g/l);}
 function atr(a,n){var s=0;for(var i=a.length-n;i<a.length;i++)s+=Math.abs(a[i]-a[i-1]);return s/n;}
-function analyse(sym){var a=S.series[sym],e9=ema(a,9),e21=ema(a,21),e12=ema(a,12),e26=ema(a,26),line=[];
+function analyse(sym){var a=S.series[sym].close,e9=ema(a,9),e21=ema(a,21),e12=ema(a,12),e26=ema(a,26),line=[];
   for(var i=0;i<a.length;i++)line.push(e12[i]-e26[i]);
   var sg=ema(line,9),hist=line[line.length-1]-sg[sg.length-1],r=rsi(a,14),p=a[a.length-1];
   var f9=e9[e9.length-1],f21=e21[e21.length-1];
@@ -136,16 +158,22 @@ function analyse(sym){var a=S.series[sym],e9=ema(a,9),e21=ema(a,21),e12=ema(a,12
   if(sig==="BUY"){sl=p-dist;tp=p+dist*2;}
   if(sig==="SELL"){sl=p+dist;tp=p-dist*2;}
   return {p:p,f9:f9,f21:f21,r:r,hist:hist,sig:sig,sl:sl,tp:tp,dist:dist};}
-function usdzar(){var a=S.series.USDZAR;return a[a.length-1];}
+
+/* ---------- money helpers ---------- */
+function usdzar(){var a=S.series.USDZAR.close;return a[a.length-1];}
 function toZAR(sym,x){return PAIRS[sym].q==="ZAR"?x:x*usdzar();}
 function units(sym,dist){var risk=Math.min(parseFloat($("risk").value)||1,MAXRISK);
   var riskZAR=S.balance*risk/100,per=toZAR(sym,dist);return per>0?riskZAR/per:0;}
 function fmtR(x){return "R"+x.toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});}
 function fx(sym,x){return x===null?"–":x.toFixed(PAIRS[sym].d);}
 function hasOpen(sym){return S.open.some(function(t){return t.sym===sym;});}
+function tradePnl(t,exit){
+  var q=(exit-t.entry)*t.units*(t.side==="BUY"?1:-1)-PAIRS[t.sym].spread*t.units;
+  return toZAR(t.sym,q);
+}
 
 /* ---------- Supabase data ---------- */
-function mapOpen(r){return {id:r.id,sym:r.symbol,side:r.side,entry:Number(r.entry),sl:Number(r.stop_loss),tp:Number(r.take_profit),units:Number(r.units)};}
+function mapOpen(r){return {id:r.id,sym:r.symbol,side:r.side,entry:Number(r.entry),sl:Number(r.stop_loss),tp:Number(r.take_profit),units:Number(r.units),date:String(r.opened_at).slice(0,10)};}
 async function loadData(){
   var acc=await sb.from("demo_accounts").select("balance").eq("user_id",uid).maybeSingle();
   if(acc.error)throw acc.error;
@@ -159,26 +187,32 @@ async function loadData(){
 }
 async function saveBalance(){var r=await sb.from("demo_accounts").update({balance:S.balance,updated_at:new Date().toISOString()}).eq("user_id",uid);if(r.error)throw r.error;}
 async function closeTrade(t,exit){
-  var q=(exit-t.entry)*t.units*(t.side==="BUY"?1:-1),z=toZAR(t.sym,q);
+  var z=tradePnl(t,exit);
   var r=await sb.from("trades").update({status:"closed",exit_price:exit,pnl_zar:z,closed_at:new Date().toISOString()}).eq("id",t.id);
   if(r.error)throw r.error;
   S.balance+=z;await saveBalance();
   S.open=S.open.filter(function(x){return x.id!==t.id;});
   S.closed.unshift({sym:t.sym,side:t.side,pnl:z});
 }
-async function advance(){
-  for(var k in PAIRS){var s=S.series[k];s.push(nextPrice(k,s));if(s.length>300)s.shift();}
-  saveSeries();
+async function resolveTrades(){
   var list=S.open.slice();
-  for(var i=0;i<list.length;i++){var t=list[i],a=S.series[t.sym],p=a[a.length-1],exit=null;
-    if(t.side==="BUY"){if(p<=t.sl)exit=t.sl;else if(p>=t.tp)exit=t.tp;}
-    else{if(p>=t.sl)exit=t.sl;else if(p<=t.tp)exit=t.tp;}
-    if(exit!==null)await closeTrade(t,exit);}
+  for(var n=0;n<list.length;n++){
+    var t=list[n],s=S.series[t.sym],days=0,exit=null;
+    for(var i=0;i<s.dates.length;i++){
+      if(s.dates[i]<=t.date)continue;
+      days++;var p=s.close[i];
+      if(t.side==="BUY"){if(p<=t.sl)exit=t.sl;else if(p>=t.tp)exit=t.tp;}
+      else{if(p>=t.sl)exit=t.sl;else if(p<=t.tp)exit=t.tp;}
+      if(exit===null&&days>=MAXHOLD)exit=p;
+      if(exit!==null)break;
+    }
+    if(exit!==null)await closeTrade(t,exit);
+  }
 }
 
 /* ---------- drawing ---------- */
 function draw(sym,an){var c=$("chart"),x=c.getContext("2d"),W=c.width,H=c.height;
-  x.clearRect(0,0,W,H);var a=S.series[sym].slice(-80),e9=ema(S.series[sym],9).slice(-80),e21=ema(S.series[sym],21).slice(-80);
+  x.clearRect(0,0,W,H);var full=S.series[sym].close,a=full.slice(-80),e9=ema(full,9).slice(-80),e21=ema(full,21).slice(-80);
   var all=a.concat(an.sl!==null?[an.sl,an.tp]:[]),mn=Math.min.apply(null,all),mx=Math.max.apply(null,all),pad=(mx-mn)*0.08||0.0001;mn-=pad;mx+=pad;
   function Y(v){return H-(v-mn)/(mx-mn)*H;}function X(i){return i/(a.length-1)*W;}
   function line(arr,col){x.beginPath();x.strokeStyle=col;x.lineWidth=2;arr.forEach(function(v,i){i?x.lineTo(X(i),Y(v)):x.moveTo(X(i),Y(v));});x.stroke();}
@@ -187,15 +221,17 @@ function draw(sym,an){var c=$("chart"),x=c.getContext("2d"),W=c.width,H=c.height
   if(an.sl!==null){h(an.tp,"#22c55e");h(an.sl,"#ef4444");}}
 
 function render(){
+  if(!ready)return;
   $("bal").textContent=fmtR(S.balance);
   var nt=S.closed.length,nw=S.closed.filter(function(t){return t.pnl>0;}).length;
   $("nt").textContent=nt;$("nw").textContent=nw;$("wr").textContent=nt?Math.round(nw/nt*100)+"%":"–";
   var tabs=$("tabs");tabs.innerHTML="";
   Object.keys(PAIRS).forEach(function(k){var b=document.createElement("button");b.className="tab"+(k===cur?" on":"");
     b.textContent=k.slice(0,3)+"/"+k.slice(3);b.onclick=function(){cur=k;render();};tabs.appendChild(b);});
-  var an=analyse(cur),d=PAIRS[cur].d;
+  var an=analyse(cur),d=PAIRS[cur].d,s=S.series[cur];
   $("pairname").textContent=cur.slice(0,3)+"/"+cur.slice(3);
   $("price").textContent=an.p.toFixed(d);
+  $("asof").textContent="Daily rate for "+s.dates[s.dates.length-1];
   var sg=$("sig");sg.textContent=an.sig;sg.className="sig "+an.sig;
   $("ema").textContent=an.f9.toFixed(d)+" / "+an.f21.toFixed(d);
   $("rsi").textContent=an.r.toFixed(1);
@@ -206,9 +242,8 @@ function render(){
   var btn=$("open");btn.disabled=an.sig==="WAIT"||hasOpen(cur)||busy;
   btn.textContent=hasOpen(cur)?"Trade already open on this pair":"Open demo trade";
   draw(cur,an);
-  $("open-list").innerHTML=S.open.length?S.open.map(function(t){var a=S.series[t.sym],p=a[a.length-1],
-    q=(p-t.entry)*t.units*(t.side==="BUY"?1:-1),z=toZAR(t.sym,q);
-    return '<div class="item"><b class="'+t.side+'">'+t.side+'</b> '+t.sym+' @ '+t.entry.toFixed(PAIRS[t.sym].d)+' • floating <span class="'+(z>=0?"win":"loss")+'">'+fmtR(z)+'</span></div>';}).join(""):'<div class="note">None</div>';
+  $("open-list").innerHTML=S.open.length?S.open.map(function(t){var a=S.series[t.sym].close,p=a[a.length-1],z=tradePnl(t,p);
+    return '<div class="item"><b class="'+t.side+'">'+t.side+'</b> '+t.sym+' @ '+t.entry.toFixed(PAIRS[t.sym].d)+' • opened '+t.date+' • floating <span class="'+(z>=0?"win":"loss")+'">'+fmtR(z)+'</span></div>';}).join(""):'<div class="note">None</div>';
   $("hist").innerHTML=S.closed.length?S.closed.slice(0,10).map(function(t){
     return '<div class="item"><b class="'+t.side+'">'+t.side+'</b> '+t.sym+' • <span class="'+(t.pnl>=0?"win":"loss")+'">'+fmtR(t.pnl)+'</span></div>';}).join(""):'<div class="note">None yet</div>';
 }
@@ -224,8 +259,12 @@ function showLogin(){$("app").style.display="none";$("login").style.display="blo
 async function start(session){
   uid=session.user.id;$("who").textContent="Logged in: "+session.user.email;
   $("login").style.display="none";$("app").style.display="block";
-  loadSeries();
-  await run(loadData);
+  await run(async function(){
+    await loadData();
+    await loadPrices();
+    ready=true;
+    await resolveTrades();
+  });
 }
 async function init(){
   if(!window.supabase){msg("Could not load Supabase. Check your internet and refresh.");return;}
@@ -238,23 +277,22 @@ $("loginbtn").onclick=async function(){
   if(r.error){msg("Login failed: "+r.error.message);return;}
   $("pw").value="";await start(r.data.session);
 };
-$("logout").onclick=async function(){await sb.auth.signOut();uid=null;showLogin();};
+$("logout").onclick=async function(){await sb.auth.signOut();uid=null;ready=false;showLogin();};
 
 $("open").onclick=function(){run(async function(){
   var an=analyse(cur);if(an.sig==="WAIT")return;
   if(hasOpen(cur)){alert("You already have an open trade on this pair.");return;}
   var u=units(cur,an.dist);if(u<=0)return;
-  var r=await sb.from("trades").insert({symbol:cur,side:an.sig,entry:an.p,stop_loss:an.sl,take_profit:an.tp,units:u}).select().single();
+  var s=S.series[cur],lastDate=s.dates[s.dates.length-1];
+  var r=await sb.from("trades").insert({symbol:cur,side:an.sig,entry:an.p,stop_loss:an.sl,take_profit:an.tp,units:u,opened_at:lastDate+"T12:00:00Z"}).select().single();
   if(r.error)throw r.error;
   S.open.push(mapOpen(r.data));
 });};
-$("n1").onclick=function(){run(advance);};
-$("n10").onclick=function(){run(async function(){for(var i=0;i<10;i++)await advance();});};
+$("refresh").onclick=function(){run(async function(){await loadPrices();await resolveTrades();});};
 $("reset").onclick=function(){if(!confirm("Reset demo account to R100 000 and delete all demo trades?"))return;
   run(async function(){
     var d=await sb.from("trades").delete().eq("user_id",uid);if(d.error)throw d.error;
     S.open=[];S.closed=[];S.balance=100000;await saveBalance();
-    S.series=freshSeries();saveSeries();
   });};
 $("risk").oninput=render;
 init();

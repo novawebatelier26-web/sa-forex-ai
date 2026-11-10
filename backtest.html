@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>SA Forex AI - Strategy Lab</title>
+<title>SA Forex AI - Strategy Lab v3</title>
 <style>
 :root{--bg:#0b0f17;--card:#141b29;--text:#e8edf5;--mute:#8a96a8;--buy:#22c55e;--sell:#ef4444;--acc:#38bdf8;--line:#243047}
 *{box-sizing:border-box}
@@ -26,17 +26,18 @@ th:first-child,td:first-child{text-align:left}
 .b-pass{background:#0f3a22;color:#22c55e}
 .b-fail{background:#3b1414;color:#ef4444}
 .b-few{background:#3b2f0b;color:#facc15}
+.luck{margin-top:8px;padding:8px;border-radius:8px;background:#0b0f17;font-size:12px;line-height:1.5}
 #status{margin-top:8px;color:#facc15;font-size:12px}
 </style>
 </head>
 <body>
-<h1>SA Forex AI - Strategy Lab v2 🇿🇦</h1>
-<div class="sub">Real daily prices. Each idea is tested on early years, then on later years it has never seen.</div>
+<h1>SA Forex AI - Strategy Lab v3 🇿🇦</h1>
+<div class="sub">Real daily prices, HFM's real spreads, and a luck check: every idea must beat 40 random-entry tries that use the same stops.</div>
 
 <div class="card">
   <div class="row"><span class="k">Start year</span><input id="start" type="number" min="2001" max="2026" value="2015"></div>
   <div class="row"><span class="k">Early period ends in year</span><input id="split" type="number" min="2002" max="2026" value="2020"></div>
-  <div class="row"><span class="k">Results shown in R (amount risked per trade)</span></div>
+  <div class="row"><span class="k">Spreads used: EUR/USD 1.8 pips, GBP/USD 1.9 pips, USD/ZAR 79 pips (from your HFM demo)</span></div>
   <button class="act" id="go">Run all strategies</button>
   <div id="status"></div>
 </div>
@@ -46,21 +47,25 @@ th:first-child,td:first-child{text-align:left}
 
 <div class="card note">
 <b>How to read this</b><br>
-R = the amount risked on one trade. Avg R above 0 means the idea made money on average. Profit factor (PF) above 1 means total wins were bigger than total losses. An idea only passes if both periods show Avg R above 0.05 and PF above 1.1 with at least 40 trades each.<br><br>
-<b>Sanity check</b><br>
-The "Random entries" card should come out slightly negative, close to zero (that is just trading costs). If it is far below zero, the test is biased and the other results can't be trusted. Any real idea must beat the random card by a clear margin.<br><br>
-<b>Limits of this test</b><br>
-Daily reference rates have one price per day, so stops and targets are only checked at each day's close. When the close passes a stop or target, the trade is assumed to fill at that exact level. Real markets can gap past a stop, so real losses can be a little worse. Spreads are assumed (EUR/USD 1.2 pips, GBP/USD 1.5, USD/ZAR 50) and overnight swap costs are not included. With five ideas tested, one can pass by luck, so a pass is a reason to test further, never a promise.
+R = the amount risked on one trade. Avg R above 0 means the idea made money on average. Profit factor (PF) above 1 means wins were bigger than losses.<br><br>
+<b>The luck check</b><br>
+Under each idea, "Luck range" shows what 40 random-entry tries earned, using the same stops, targets and costs. An idea only counts as better than luck if its all-years Avg R beats the top 5% of those random tries. This also cancels out any bias in how stops are filled, because random entries get the same treatment.<br><br>
+<b>An idea PASSES only if all of these are true</b><br>
+Avg R above 0.05 and PF above 1.1 in both the early and later periods, at least 40 trades in each, and it beats the luck range.<br><br>
+<b>Limits</b><br>
+Daily reference rates have one price per day, so stops and targets are checked only at each day's close and fill at their exact level. Overnight swap costs are not included and could matter for USD/ZAR. Spreads were measured at one moment and move during the day. With six ideas tested, about one could look good by pure luck, so a pass is a reason to test further, never a promise or a 70% win rate.
 </div>
 
 <script>
 var PAIRS=[
- {id:"EURUSD",base:"EUR",quote:"USD",spread:0.00012},
- {id:"GBPUSD",base:"GBP",quote:"USD",spread:0.00015},
- {id:"USDZAR",base:"USD",quote:"ZAR",spread:0.005}
+ {id:"EURUSD",base:"EUR",quote:"USD",spread:0.00018},
+ {id:"GBPUSD",base:"GBP",quote:"USD",spread:0.00019},
+ {id:"USDZAR",base:"USD",quote:"ZAR",spread:0.0079}
 ];
+var RUNS=40;
 function $(id){return document.getElementById(id);}
 function status(t){$("status").textContent=t||"";}
+function pause(){return new Promise(function(r){setTimeout(r,0);});}
 
 async function getSeries(p,fromYear){
   var thisYear=new Date().getUTCFullYear(),dates=[],close=[];
@@ -88,12 +93,18 @@ function rsiArr(a,n){
 function atrAt(a,i,n){var s=0;for(var k=i-n+1;k<=i;k++)s+=Math.abs(a[k]-a[k-1]);return s/n;}
 function pseudo(i,seed){var x=Math.sin(i*12.9898+seed*78.233)*43758.5453;return x-Math.floor(x);}
 
-function indicators(c,seed){
+function indicators(c){
   var e12=emaArr(c,12),e26=emaArr(c,26),ml=[],i;
   for(i=0;i<c.length;i++)ml.push(e12[i]-e26[i]);
-  var sg=emaArr(ml,9),h=[];
-  for(i=0;i<c.length;i++)h.push(ml[i]-sg[i]);
-  return {c:c,e9:emaArr(c,9),e21:emaArr(c,21),e20:emaArr(c,20),e50:emaArr(c,50),e200:emaArr(c,200),h:h,rs:rsiArr(c,14),seed:seed};
+  var sg=emaArr(ml,9),h=[],sma=[],sd=[];
+  for(i=0;i<c.length;i++){
+    h.push(ml[i]-sg[i]);
+    if(i<19){sma.push(c[i]);sd.push(0);continue;}
+    var s=0,q=0,k;for(k=i-19;k<=i;k++)s+=c[k];var m=s/20;
+    for(k=i-19;k<=i;k++)q+=(c[k]-m)*(c[k]-m);
+    sma.push(m);sd.push(Math.sqrt(q/20));
+  }
+  return {c:c,e9:emaArr(c,9),e21:emaArr(c,21),e20:emaArr(c,20),e50:emaArr(c,50),e200:emaArr(c,200),h:h,rs:rsiArr(c,14),sma:sma,sd:sd};
 }
 
 var STRATS=[
@@ -109,8 +120,10 @@ var STRATS=[
     return d.c[i]>hi?1:(d.c[i]<lo?-1:0);}},
  {id:"rsi",name:"4. RSI reversal",desc:"Buy when RSI climbs back above 30, sell when it drops back below 70. Stop 2 ATR, target 2 ATR.",sl:2,tp:2,hold:15,
   sig:function(d,i){if(d.rs[i-1]<30&&d.rs[i]>=30)return 1;if(d.rs[i-1]>70&&d.rs[i]<=70)return -1;return 0;}},
- {id:"rand",name:"5. Random entries (sanity check)",desc:"Enters at random with the same stop and target as idea 1. Should come out slightly negative, close to zero.",sl:1.5,tp:3,hold:20,
-  sig:function(d,i){var r=pseudo(i,d.seed);return r<0.04?1:(r<0.08?-1:0);}}
+ {id:"boll",name:"5. Bollinger reversion",desc:"Buy when the close falls below its 20-day average minus 2 standard deviations, sell when above plus 2. Stop 2 ATR, target 2 ATR.",sl:2,tp:2,hold:15,
+  sig:function(d,i){if(d.c[i]<d.sma[i]-2*d.sd[i])return 1;if(d.c[i]>d.sma[i]+2*d.sd[i])return -1;return 0;}},
+ {id:"mom",name:"6. 60-day momentum",desc:"Buy if the close is higher than 60 days ago, otherwise sell. Stop 2 ATR, target 4 ATR.",sl:2,tp:4,hold:30,
+  sig:function(d,i){return d.c[i]>d.c[i-60]?1:-1;}}
 ];
 
 function simulate(p,dates,d,S,fromDate){
@@ -118,7 +131,6 @@ function simulate(p,dates,d,S,fromDate){
   for(i=210;i<c.length;i++){
     if(open){
       var t=open,exit=null,price=c[i];
-      /* stops and targets both fill at their exact level (fair to wins and losses) */
       if(t.side===1){if(price<=t.sl)exit=t.sl;else if(price>=t.tp)exit=t.tp;}
       else{if(price>=t.sl)exit=t.sl;else if(price<=t.tp)exit=t.tp;}
       if(exit===null&&i-t.i>=S.hold)exit=price;
@@ -143,9 +155,29 @@ function stats(list){
   list.forEach(function(t){if(t.R>0){w++;gw+=t.R;}else gl+=-t.R;sum+=t.R;});
   return {n:n,wr:n?w/n:0,avg:n?sum/n:0,pf:gl>0?gw/gl:(gw>0?99:0)};
 }
-function verdict(e,l){
+function pctile(arr,p){var a=arr.slice().sort(function(x,y){return x-y;});return a[Math.min(a.length-1,Math.floor(p*a.length))];}
+function mean(arr){var s=0;arr.forEach(function(x){s+=x;});return arr.length?s/arr.length:0;}
+
+async function luck(S,series,ind,fromDate){
+  var res=[];
+  for(var r=0;r<RUNS;r++){
+    var tr=[];
+    for(var k=0;k<PAIRS.length;k++){
+      var seed=r*13+k*5+1;
+      var RS={sl:S.sl,tp:S.tp,hold:S.hold,sig:(function(sd){return function(d,i){var x=pseudo(i,sd);return x<0.04?1:(x<0.08?-1:0);};})(seed)};
+      tr=tr.concat(simulate(PAIRS[k],series[k].dates,ind[k],RS,fromDate));
+    }
+    res.push(stats(tr).avg);
+  }
+  return {mean:mean(res),lo:pctile(res,0.05),hi:pctile(res,0.95)};
+}
+
+function verdict(e,l,a,lk){
   if(e.n<40||l.n<40)return ["few","TOO FEW TRADES"];
-  if(e.avg>0.05&&e.pf>1.1&&l.avg>0.05&&l.pf>1.1)return ["pass","PASSED BOTH PERIODS"];
+  var prof=e.avg>0.05&&e.pf>1.1&&l.avg>0.05&&l.pf>1.1;
+  var beats=a.avg>lk.hi;
+  if(prof&&beats)return ["pass","PASSED ALL CHECKS"];
+  if(prof&&!beats)return ["few","NOT BETTER THAN LUCK"];
   return ["fail","FAILED"];
 }
 function cls(x){return x>0?"win":"loss";}
@@ -160,31 +192,35 @@ $("go").onclick=async function(){
     var startYear=Math.min(Math.max(parseInt($("start").value)||2015,2001),thisYear);
     var split=Math.min(Math.max(parseInt($("split").value)||2020,startYear),thisYear-1);
     var fromDate=startYear+"-01-01",splitDate=(split+1)+"-01-01";
-    var results={};STRATS.forEach(function(S){results[S.id]=[];});
+    var series=[],ind=[];
     for(var k=0;k<PAIRS.length;k++){
       var s=await getSeries(PAIRS[k],startYear-1);
-      status("Testing "+PAIRS[k].id+"...");
-      var d=indicators(s.close,k+1);
-      STRATS.forEach(function(S){results[S.id]=results[S.id].concat(simulate(PAIRS[k],s.dates,d,S,fromDate));});
+      series.push(s);ind.push(indicators(s.close));
     }
-    var html="",passes=0,randAvg=0;
-    STRATS.forEach(function(S){
-      var all=results[S.id];
+    var html="",passes=0,lucky=0;
+    for(var si=0;si<STRATS.length;si++){
+      var S=STRATS[si];
+      status("Testing "+S.name+" and its 40 random tries...");
+      await pause();
+      var all=[];
+      for(var k2=0;k2<PAIRS.length;k2++)all=all.concat(simulate(PAIRS[k2],series[k2].dates,ind[k2],S,fromDate));
       var early=all.filter(function(t){return t.date<splitDate;}),late=all.filter(function(t){return t.date>=splitDate;});
-      var e=stats(early),l=stats(late),a=stats(all),v=verdict(e,l);
-      if(S.id==="rand")randAvg=a.avg;
-      if(v[0]==="pass"&&S.id!=="rand")passes++;
+      var e=stats(early),l=stats(late),a=stats(all);
+      var lk=await luck(S,series,ind,fromDate);
+      var v=verdict(e,l,a,lk);
+      if(v[0]==="pass")passes++;
+      if(v[1]==="NOT BETTER THAN LUCK")lucky++;
       html+="<div class='card'><div class='row'><b>"+S.name+"</b><span class='badge b-"+v[0]+"'>"+v[1]+"</span></div>"+
         "<div class='note'>"+S.desc+"</div>"+
         "<table><tr><th>Period</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>PF</th></tr>"+
-        rowHtml("Early "+startYear+"-"+split,e)+rowHtml("Later "+(split+1)+"+",l)+rowHtml("All",a)+"</table></div>";
-    });
+        rowHtml("Early "+startYear+"-"+split,e)+rowHtml("Later "+(split+1)+"+",l)+rowHtml("All",a)+"</table>"+
+        "<div class='luck'><b>Luck range</b> (40 random tries, same stops and costs), Avg R all years: typical <b>"+lk.mean.toFixed(2)+"</b>, range "+lk.lo.toFixed(2)+" to "+lk.hi.toFixed(2)+". This idea scored <b class='"+cls(a.avg-lk.hi)+"'>"+a.avg.toFixed(2)+"</b>.</div></div>";
+    }
     $("out").innerHTML=html;
     $("summary").style.display="block";
-    var calib=randAvg<-0.15?"<b>Warning:</b> the random-entries check is far below zero ("+randAvg.toFixed(2)+"R), so this test is still biased. Do not trust these results.<br><br>":"<b>Sanity check OK:</b> random entries came out at "+randAvg.toFixed(2)+"R, close to zero as expected.<br><br>";
-    $("summary").innerHTML=calib+(passes===0?
-      "<b>Result:</b> no idea passed both periods.":
-      "<b>Result:</b> "+passes+" idea(s) passed both periods. This is a reason to test further, not proof that it will make money.");
+    $("summary").innerHTML="<b>Result:</b> "+(passes===0?
+      "no idea passed all checks"+(lucky>0?" ("+lucky+" made money in both periods but did not beat luck).":"."):
+      passes+" idea(s) passed all checks. With six ideas tested, one can pass by chance, so treat this as a reason to test further, not as proof.");
     status("");
   }catch(e){status("Problem: "+(e&&e.message?e.message:e));}
   btn.disabled=false;
